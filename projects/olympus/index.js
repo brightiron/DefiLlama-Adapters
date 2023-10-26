@@ -1,7 +1,7 @@
-const ADDRESSES = require('../helper/coreAssets.json')
+const ADDRESSES = require("../helper/coreAssets.json");
 const { blockQuery } = require("../helper/http");
 const { getEnv } = require("../helper/env");
-const { staking } = require('../helper/staking');
+const { staking } = require("../helper/staking");
 const { sumTokens2 } = require("../helper/unwrapLPs");
 
 const OlympusStakings = [
@@ -12,8 +12,8 @@ const OlympusStakings = [
   "0xb63cac384247597756545b500253ff8e607a8020",
 ];
 
-const OHM_V1 = "0x383518188c0c6d7730d91b2c03a03c837814a899" // this is OHM v1
-const OHM = "0x64aa3364f17a4d01c6f1751fd97c2bd3d7e7f1d5" // this is OHM v1
+const OHM_V1 = "0x383518188c0c6d7730d91b2c03a03c837814a899"; // this is OHM v1
+const OHM = "0x64aa3364f17a4d01c6f1751fd97c2bd3d7e7f1d5"; // this is OHM v1
 
 /** Map any staked assets without price feeds to those with price feeds.
  * All balances are 1: 1 to their unstaked counterpart that has the price feed.
@@ -25,8 +25,7 @@ const addressMap = {
     "0x3432b6a60d23ca0dfca7761b7ab56459d9c964d0", // veFXS -> FXS
   "0x3fa73f1e5d8a792c80f426fc8f84fbf7ce9bbcac":
     "0xc0c293ce456ff0ed870add98a0828dd4d2903dbf", //vlAURA -> AURA
-  [ADDRESSES.ethereum.vlCVX]:
-    ADDRESSES.ethereum.CVX, //vlCVX -> CVX
+  [ADDRESSES.ethereum.vlCVX]: ADDRESSES.ethereum.CVX, //vlCVX -> CVX
   "0xa02d8861fbfd0ba3d8ebafa447fe7680a3fa9a93":
     "0xd1ec5e215e8148d76f4460e4097fd3d5ae0a3558", //aura50OHM-50WETH -> 50OHM-50WETH
   "0x0ef97ef0e20f84e82ec2d79cbd9eda923c3daf09":
@@ -63,6 +62,18 @@ query {
   }
 }`;
 
+const subgraphUrls = {
+  ethereum: `https://gateway-arbitrum.network.thegraph.com/api/${getEnv("OLYMPUS_GRAPH_API_KEY")}/subgraphs/id/7jeChfyUTWRyp2JxPGuuzxvGt3fDKMkC9rLjm7sfLcNp`,
+  arbitrum:
+    "https://api.thegraph.com/subgraphs/name/olympusdao/protocol-metrics-arbitrum",
+  fantom:
+    "https://api.thegraph.com/subgraphs/name/olympusdao/protocol-metrics-fantom",
+  polygon:
+    "https://api.thegraph.com/subgraphs/name/olympusdao/protocol-metrics-polygon",
+};
+
+//filter out problematic pools that dont have a decimals function.
+const poolsWithoutDecimals = ["0x88051b0eea095007d3bef21ab287be961f3d8598"];
 
 //Subgraph returns balances in tokenAddress / allocator pairs. Need to return based on balance.
 function sumBalancesByTokenAddress(arr) {
@@ -89,15 +100,6 @@ function sumBalancesByTokenAddress(arr) {
  * #3. Sum values returned
  ***/
 async function tvl(timestamp, block, _, { api }, isOwnTokensMode = false) {
-const subgraphUrls = {
-  ethereum: `https://gateway.thegraph.com/api/${getEnv('OLYMPUS_GRAPH_API_KEY')}/subgraphs/id/DTcDcUSBRJjz9NeoK5VbXCVzYbRTyuBwdPUqMi8x32pY`,
-  arbitrum:
-    "https://api.thegraph.com/subgraphs/name/olympusdao/protocol-metrics-arbitrum",
-  fantom:
-    "https://api.thegraph.com/subgraphs/name/olympusdao/protocol-metrics-fantom",
-  polygon:
-    "https://api.thegraph.com/subgraphs/name/olympusdao/protocol-metrics-polygon",
-};
   const indexedBlockForEndpoint = await blockQuery(
     subgraphUrls[api.chain],
     getLatestBlockIndexed,
@@ -108,6 +110,10 @@ const subgraphUrls = {
     subgraphUrls[api.chain],
     protocolQuery(blockNum),
     { api }
+  );
+
+  const filteredTokenRecords = tokenRecords.filter(
+    (t) => !poolsWithoutDecimals.includes(t.tokenAddress)
   );
 
   const aDay = 24 * 3600;
@@ -124,7 +130,7 @@ const subgraphUrls = {
    * that need to be normalized for pricing .
    * See addressMap above
    **/
-  const normalizedFilteredTokenRecords = tokenRecords.map((token) => {
+  const normalizedFilteredTokenRecords = filteredTokenRecords.map((token) => {
     const normalizedAddress = addressMap[token.tokenAddress]
       ? addressMap[token.tokenAddress]
       : token.tokenAddress;
@@ -133,25 +139,32 @@ const subgraphUrls = {
 
   const tokensToBalances = sumBalancesByTokenAddress(
     normalizedFilteredTokenRecords
-  ).filter(i => {
-    if (api.chain !== 'arbitrum') return true;
-    return !['0x89dc7e71e362faf88d92288fe2311d25c6a1b5e0000200000000000000000423', '0xce6195089b302633ed60f3f427d1380f6a2bfbc7000200000000000000000424'].includes(i.tokenAddress)
-  })
-  const tokens = tokensToBalances.map(i => i.tokenAddress)
+  ).filter((i) => {
+    if (api.chain !== "arbitrum") return true;
+    return ![
+      "0x89dc7e71e362faf88d92288fe2311d25c6a1b5e0000200000000000000000423",
+      "0xce6195089b302633ed60f3f427d1380f6a2bfbc7000200000000000000000424",
+    ].includes(i.tokenAddress);
+  });
+  const tokens = tokensToBalances.map((i) => i.tokenAddress);
 
-
-  const decimals = await api.multiCall({ abi: 'erc20:decimals', calls: tokens })
-  const ownTokens = new Set([
-    '0x0ab87046fBb341D058F17CBC4c1133F25a20a52f', // GOHM
-    '0x64aa3364f17a4d01c6f1751fd97c2bd3d7e7f1d5', // OHM
-  ].map(i => i.toLowerCase()))
+  const decimals = await api.multiCall({
+    abi: "erc20:decimals",
+    calls: tokens,
+  });
+  const ownTokens = new Set(
+    [
+      "0x0ab87046fBb341D058F17CBC4c1133F25a20a52f", // GOHM
+      "0x64aa3364f17a4d01c6f1751fd97c2bd3d7e7f1d5", // OHM
+    ].map((i) => i.toLowerCase())
+  );
   tokensToBalances.map(async (token, i) => {
     if (ownTokens.has(token.tokenAddress.toLowerCase())) {
       if (!isOwnTokensMode) return;
     } else if (isOwnTokensMode) return;
-    api.add(token.tokenAddress, token.balance * 10 ** decimals[i])
-  })
-  return sumTokens2({ api, resolveLP: true, })
+    api.add(token.tokenAddress, token.balance * 10 ** decimals[i]);
+  });
+  return sumTokens2({ api, resolveLP: true });
 }
 
 async function ownTokens(timestamp, block, _, { api }) {
